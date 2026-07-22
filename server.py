@@ -627,4 +627,4 @@ def index():
 
 if __name__ == '__main__':
     print('中国象棋联机服务器启动于 http://localhost:3000')
-    socketio.run(app, host='0.0.0.0', port=3000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=80, debug=True)
