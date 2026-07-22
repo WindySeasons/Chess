@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中国象棋棋盘</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: #3e2415;
+    font-family: "KaiTi", "楷体", "STKaiti", "SimSun", serif;
+  }
+  canvas { display: block; cursor: default; }
+</style>
+</head>
+<body>
+<canvas id="board"></canvas>
+<script>
+(function () {
+  const canvas = document.getElementById('board');
+  const ctx = canvas.getContext('2d');
+
+  /* ============ 棋盘常量 ============ */
+  const COLS = 9;   // 竖线数量（列）
+  const ROWS = 10;  // 横线数量（行）
+
+  /* ============ 棋盘参数 & 选中状态 ============ */
+  let boardMx, boardMy, boardBw, boardBh, boardCell;
+  let selectedIndex = null;   // 当前选中棋子在 pieces 中的下标，null 表示未选中
+  let currentTurn = true;     // true = 红方走，false = 黑方走
+  let gameOver    = null;     // null = 进行中，'red' = 红方胜，'black' = 黑方胜
+
+  /* ============ 棋子数据 ============ */
+  const pieces = [
+    // --- 黑方（上方，row 0~4）---
+    { text: '車', isRed: false, row: 0, col: 0 },
+    { text: '馬', isRed: false, row: 0, col: 1 },
+    { text: '象', isRed: false, row: 0, col: 2 },
+    { text: '士', isRed: false, row: 0, col: 3 },
+    { text: '將', isRed: false, row: 0, col: 4 },
+    { text: '士', isRed: false, row: 0, col: 5 },
+    { text: '象', isRed: false, row: 0, col: 6 },
+    { text: '馬', isRed: false, row: 0, col: 7 },
+    { text: '車', isRed: false, row: 0, col: 8 },
+    { text: '炮', isRed: false, row: 2, col: 1 },
+    { text: '炮', isRed: false, row: 2, col: 7 },
+    { text: '卒', isRed: false, row: 3, col: 0 },
+    { text: '卒', isRed: false, row: 3, col: 2 },
+    { text: '卒', isRed: false, row: 3, col: 4 },
+    { text: '卒', isRed: false, row: 3, col: 6 },
+    { text: '卒', isRed: false, row: 3, col: 8 },
+    // --- 红方（下方，row 5~9）---
+    { text: '兵', isRed: true, row: 6, col: 0 },
+    { text: '兵', isRed: true, row: 6, col: 2 },
+    { text: '兵', isRed: true, row: 6, col: 4 },
+    { text: '兵', isRed: true, row: 6, col: 6 },
+    { text: '兵', isRed: true, row: 6, col: 8 },
+    { text: '砲', isRed: true, row: 7, col: 1 },
+    { text: '砲', isRed: true, row: 7, col: 7 },
+    { text: '車', isRed: true, row: 9, col: 0 },
+    { text: '馬', isRed: true, row: 9, col: 1 },
+    { text: '相', isRed: true, row: 9, col: 2 },
+    { text: '仕', isRed: true, row: 9, col: 3 },
+    { text: '帥', isRed: true, row: 9, col: 4 },
+    { text: '仕', isRed: true, row: 9, col: 5 },
+    { text: '相', isRed: true, row: 9, col: 6 },
+    { text: '馬', isRed: true, row: 9, col: 7 },
+    { text: '車', isRed: true, row: 9, col: 8 },
+  ];
+
+  /* ============ 自适应尺寸计算 & 绘制入口 ============ */
+  function resize() {
+    const maxW = window.innerWidth  * 0.94;
+    const maxH = window.innerHeight * 0.94;
+
+    // 让棋盘宽高比接近 8:9（9列间距 : 10行间距）
+    const cell = Math.min(maxW / (COLS + 0.8), maxH / (ROWS + 0.8));
+    const boardW = cell * (COLS - 1);
+    const boardH = cell * (ROWS - 1);
+
+    // canvas 实际尺寸 = 棋盘 + 四周留白
+    const marginX = cell * 0.9;
+    const marginY = cell * 0.9;
+    canvas.width  = boardW + marginX * 2;
+    canvas.height = boardH + marginY * 2;
+
+    // CSS 显示尺寸（高分屏仍清晰）
+    canvas.style.width  = canvas.width  + 'px';
+    canvas.style.height = canvas.height + 'px';
+
+    boardMx = marginX;
+    boardMy = marginY;
+    boardBw = boardW;
+    boardBh = boardH;
+    boardCell = cell;
+
+    draw(marginX, marginY, boardW, boardH, cell);
+  }
+
+  /* ============ 主绘制函数 ============ */
+  function draw(mx, my, bw, bh, cell) {
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // --- 底色：暖黄木纹 ---
+    ctx.fillStyle = '#DEB887';
+    ctx.fillRect(0, 0, W, H);
+
+    // 外框：深木色边框
+    const borderR = cell * 0.16;
+    roundRect(ctx, mx - cell * 0.32, my - cell * 0.32,
+      bw + cell * 0.64, bh + cell * 0.64, borderR, '#B8860B', '#5C3317');
+
+    // 内填：棋盘暖黄
+    roundRect(ctx, mx - cell * 0.12, my - cell * 0.12,
+      bw + cell * 0.24, bh + cell * 0.24, borderR * 0.7, '#DEB887', null);
+
+    // --- 线条参数 ---
+    ctx.strokeStyle = '#4A2C0A';
+    ctx.lineWidth   = Math.max(1.5, cell * 0.03);
+    ctx.lineCap     = 'round';
+
+    /* ---------- 横线（10 条） ---------- */
+    for (let r = 0; r < ROWS; r++) {
+      const y = my + r * cell;
+      ctx.beginPath();
+      ctx.moveTo(mx, y);
+      ctx.lineTo(mx + bw, y);
+      ctx.stroke();
+    }
+
+    /* ---------- 竖线（9 条）--- 河界处断开 ---------- */
+    for (let c = 0; c < COLS; c++) {
+      const x = mx + c * cell;
+      // 上半段：行 0 → 行 4
+      ctx.beginPath();
+      ctx.moveTo(x, my);
+      ctx.lineTo(x, my + 4 * cell);
+      ctx.stroke();
+      // 下半段：行 5 → 行 9
+      ctx.beginPath();
+      ctx.moveTo(x, my + 5 * cell);
+      ctx.lineTo(x, my + 9 * cell);
+      ctx.stroke();
+    }
+
+    // 左右两条边线上下贯通（覆盖河界缺口）
+    [mx, mx + bw].forEach(function (x) {
+      ctx.beginPath();
+      ctx.moveTo(x, my);
+      ctx.lineTo(x, my + 9 * cell);
+      ctx.stroke();
+    });
+
+    /* ---------- 九宫格斜线（米字） ---------- */
+    drawPalace(mx + 3 * cell, my,          cell); // 上方九宫
+    drawPalace(mx + 3 * cell, my + 7 * cell, cell); // 下方九宫
+
+    /* ---------- 楚河 · 汉界 ---------- */
+    const riverY = my + 4.5 * cell;
+    ctx.fillStyle = '#4A2C0A';
+    const fontSize = cell * 0.46;
+    ctx.font = `bold ${fontSize}px "KaiTi","楷体","STKaiti","SimSun",serif`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 左半侧：楚  河
+    ctx.fillText('楚    河', mx + 2 * cell, riverY);
+    // 右半侧：汉  界
+    ctx.fillText('汉    界', mx + 6 * cell, riverY);
+
+    // --- 绘制棋子 ---
+    drawAllPieces(mx, my, cell);
+
+    // --- 将军提示 & 胜负弹窗 ---
+    var inCheck = !gameOver && isInCheck(currentTurn, pieces);
+    if (inCheck || gameOver) {
+      var ox = mx + bw / 2;
+      var oy = my + bh / 2;
+      var ow = cell * 4.5;
+      var oh = cell * 1.6;
+
+      // 半透明遮罩
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      roundRect(ctx, ox - ow / 2, oy - oh / 2, ow, oh, cell * 0.2, null, null);
+      ctx.fill();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      if (gameOver) {
+        // 胜负
+        var winner = gameOver === 'red' ? '红方胜' : '黑方胜';
+        ctx.fillStyle = gameOver === 'red' ? '#FF4444' : '#CCCCCC';
+        ctx.font = `bold ${cell * 0.7}px "KaiTi","楷体","STKaiti","SimSun",serif`;
+        ctx.fillText(winner, ox, oy);
+      } else {
+        // 将军
+        ctx.fillStyle = '#FFD700';
+        ctx.font = `bold ${cell * 0.6}px "KaiTi","楷体","STKaiti","SimSun",serif`;
+        ctx.fillText('将军！', ox, oy);
+      }
+    }
+  }
+
+  /* ============ 九宫格斜线绘制 ============ */
+  function drawPalace(x, y, s) {
+    // 左上 → 右下
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 2 * s, y + 2 * s);
+    ctx.stroke();
+    // 右上 → 左下
+    ctx.beginPath();
+    ctx.moveTo(x + 2 * s, y);
+    ctx.lineTo(x, y + 2 * s);
+    ctx.stroke();
+  }
+
+  /* ============ 棋子绘制 ============ */
+  function drawPiece(ctx, x, y, text, isRed, radius, isSelected) {
+    // 圆形底色
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = isRed ? '#C0392B' : '#222222';
+    ctx.fill();
+
+    // 选中高亮：金色粗边框
+    if (isSelected) {
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = Math.max(2.5, radius * 0.16);
+      ctx.stroke();
+    }
+
+    // 圆形边框
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = Math.max(1, radius * 0.08);
+    ctx.stroke();
+
+    // 汉字
+    ctx.fillStyle = '#FFFFFF';
+    const fontSize = radius * 1.1;
+    ctx.font = `bold ${fontSize}px "KaiTi","楷体","STKaiti","SimSun",serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y);
+  }
+
+  function drawAllPieces(mx, my, cell) {
+    const radius = cell * 0.42;
+    pieces.forEach(function (p, i) {
+      const x = mx + p.col * cell;
+      const y = my + p.row * cell;
+      drawPiece(ctx, x, y, p.text, p.isRed, radius, i === selectedIndex);
+    });
+  }
+
+  /* ============ 圆角矩形工具 ============ */
+  function roundRect(ctx, x, y, w, h, r, fillColor, strokeColor) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+    if (fillColor)   { ctx.fillStyle = fillColor;   ctx.fill();   }
+    if (strokeColor) { ctx.strokeStyle = strokeColor; ctx.stroke(); }
+  }
+
+  /* ============ 走法规则 ============ */
+
+  // 检查坐标是否在棋盘内
+  function inBoard(row, col) {
+    return row >= 0 && row < ROWS && col >= 0 && col < COLS;
+  }
+
+  // 查找 (row, col) 处棋子下标，无则返回 -1
+  function pieceAt(row, col, pieces) {
+    for (var i = 0; i < pieces.length; i++) {
+      if (pieces[i].row === row && pieces[i].col === col) return i;
+    }
+    return -1;
+  }
+
+  // ---- 車：走直线，遇子停 ----
+  function getRookMoves(r, c, pieces) {
+    var moves = [];
+    var myIdx = pieceAt(r, c, pieces);
+    var dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+    for (var d = 0; d < dirs.length; d++) {
+      var dr = dirs[d][0], dc = dirs[d][1];
+      var nr = r + dr, nc = c + dc;
+      while (inBoard(nr, nc)) {
+        var idx = pieceAt(nr, nc, pieces);
+        if (idx === -1) {
+          moves.push({row: nr, col: nc});
+        } else {
+          if (pieces[idx].isRed !== pieces[myIdx].isRed) moves.push({row: nr, col: nc});
+          break;
+        }
+        nr += dr; nc += dc;
+      }
+    }
+    return moves;
+  }
+
+  // ---- 馬：日字形，蹩脚检查 ----
+  function getKnightMoves(r, c, pieces) {
+    var moves = [];
+    var myIdx = pieceAt(r, c, pieces);
+    var jumps = [
+      {dr:-2, dc:-1, lr:-1, lc: 0},
+      {dr:-2, dc: 1, lr:-1, lc: 0},
+      {dr: 2, dc:-1, lr: 1, lc: 0},
+      {dr: 2, dc: 1, lr: 1, lc: 0},
+      {dr:-1, dc:-2, lr: 0, lc:-1},
+      {dr:-1, dc: 2, lr: 0, lc: 1},
+      {dr: 1, dc:-2, lr: 0, lc:-1},
+      {dr: 1, dc: 2, lr: 0, lc: 1},
+    ];
+    for (var i = 0; i < jumps.length; i++) {
+      var j = jumps[i];
+      var nr = r + j.dr, nc = c + j.dc;
+      var lr = r + j.lr, lc = c + j.lc;
+      if (!inBoard(nr, nc)) continue;
+      if (pieceAt(lr, lc, pieces) !== -1) continue; // 蹩脚
+      var idx = pieceAt(nr, nc, pieces);
+      if (idx === -1 || pieces[idx].isRed !== pieces[myIdx].isRed) {
+        moves.push({row: nr, col: nc});
+      }
+    }
+    return moves;
+  }
+
+  // ---- 砲/炮：走直线不吃子，翻山吃子 ----
+  function getCannonMoves(r, c, pieces) {
+    var moves = [];
+    var myIdx = pieceAt(r, c, pieces);
+    var dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+    for (var d = 0; d < dirs.length; d++) {
+      var dr = dirs[d][0], dc = dirs[d][1];
+      var nr = r + dr, nc = c + dc;
+      // 走子：直线走到第一个阻挡（不能吃）
+      while (inBoard(nr, nc) && pieceAt(nr, nc, pieces) === -1) {
+        moves.push({row: nr, col: nc});
+        nr += dr; nc += dc;
+      }
+      // 吃子：跳过炮架后再找第一个敌方棋子
+      if (inBoard(nr, nc)) {
+        nr += dr; nc += dc; // 跳过炮架
+        while (inBoard(nr, nc)) {
+          var idx = pieceAt(nr, nc, pieces);
+          if (idx !== -1) {
+            if (pieces[idx].isRed !== pieces[myIdx].isRed) moves.push({row: nr, col: nc});
+            break;
+          }
+          nr += dr; nc += dc;
+        }
+      }
+    }
+    return moves;
+  }
+
+  // ---- 相/象：田字形，不过河，塞眼检查 ----
+  function getElephantMoves(r, c, isRed, pieces) {
+    var moves = [];
+    var myIdx = pieceAt(r, c, pieces);
+    var dests = [[-2,-2],[-2,2],[2,-2],[2,2]];
+    var eyes  = [[-1,-1],[-1,1],[1,-1],[1,1]];
+    for (var i = 0; i < dests.length; i++) {
+      var nr = r + dests[i][0], nc = c + dests[i][1];
+      var er = r + eyes[i][0],  ec = c + eyes[i][1];
+      if (!inBoard(nr, nc)) continue;
+      if (isRed && nr < 5) continue;       // 红相不过河
+      if (!isRed && nr > 4) continue;       // 黑象不过河
+      if (pieceAt(er, ec, pieces) !== -1) continue; // 塞眼
+      var idx = pieceAt(nr, nc, pieces);
+      if (idx === -1 || pieces[idx].isRed !== pieces[myIdx].isRed) {
+        moves.push({row: nr, col: nc});
+      }
+    }
+    return moves;
+  }
+
+  // ---- 仕/士：九宫内斜走一步 ----
+  function getAdvisorMoves(r, c, isRed, pieces) {
+    var moves = [];
+    var myIdx = pieceAt(r, c, pieces);
+    var dests = [[-1,-1],[-1,1],[1,-1],[1,1]];
+    for (var i = 0; i < dests.length; i++) {
+      var nr = r + dests[i][0], nc = c + dests[i][1];
+      if (!inBoard(nr, nc)) continue;
+      if (nc < 3 || nc > 5) continue;          // 九宫列范围
+      if (isRed && (nr < 7 || nr > 9)) continue; // 红九宫
+      if (!isRed && (nr < 0 || nr > 2)) continue; // 黑九宫
+      var idx = pieceAt(nr, nc, pieces);
+      if (idx === -1 || pieces[idx].isRed !== pieces[myIdx].isRed) {
+        moves.push({row: nr, col: nc});
+      }
+    }
+    return moves;
+  }
+
+  // ---- 帥/將：九宫内直走一步，含飞将检查 ----
+  function getGeneralMoves(r, c, isRed, pieces) {
+    var moves = [];
+    var myIdx = pieceAt(r, c, pieces);
+    var dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+    for (var d = 0; d < dirs.length; d++) {
+      var nr = r + dirs[d][0], nc = c + dirs[d][1];
+      if (!inBoard(nr, nc)) continue;
+      if (nc < 3 || nc > 5) continue;
+      if (isRed && (nr < 7 || nr > 9)) continue;
+      if (!isRed && (nr < 0 || nr > 2)) continue;
+      var idx = pieceAt(nr, nc, pieces);
+      if (idx === -1 || pieces[idx].isRed !== pieces[myIdx].isRed) {
+        moves.push({row: nr, col: nc});
+      }
+    }
+    return moves;
+  }
+
+  // ---- 兵/卒：未过河向前，过河可左右前 ----
+  function getPawnMoves(r, c, isRed, pieces) {
+    var moves = [];
+    var myIdx = pieceAt(r, c, pieces);
+    var forward = isRed ? -1 : 1;
+    var crossed = isRed ? (r <= 4) : (r >= 5);
+
+    // 向前一步
+    var nr = r + forward;
+    if (inBoard(nr, c)) {
+      var idx = pieceAt(nr, c, pieces);
+      if (idx === -1 || pieces[idx].isRed !== pieces[myIdx].isRed) {
+        moves.push({row: nr, col: c});
+      }
+    }
+    // 过河后可左右
+    if (crossed) {
+      for (var dc = -1; dc <= 1; dc += 2) {
+        var lc = c + dc;
+        if (inBoard(r, lc)) {
+          var lidx = pieceAt(r, lc, pieces);
+          if (lidx === -1 || pieces[lidx].isRed !== pieces[myIdx].isRed) {
+            moves.push({row: r, col: lc});
+          }
+        }
+      }
+    }
+    return moves;
+  }
+
+  // 获取某颗棋子不考虑将军的所有走法
+  function getRawMoves(pieceIndex, pieces) {
+    var p = pieces[pieceIndex];
+    switch (p.text) {
+      case '車': return getRookMoves(p.row, p.col, pieces);
+      case '馬': return getKnightMoves(p.row, p.col, pieces);
+      case '砲': case '炮': return getCannonMoves(p.row, p.col, pieces);
+      case '相': case '象': return getElephantMoves(p.row, p.col, p.isRed, pieces);
+      case '仕': case '士': return getAdvisorMoves(p.row, p.col, p.isRed, pieces);
+      case '帥': case '將': return getGeneralMoves(p.row, p.col, p.isRed, pieces);
+      case '兵': case '卒': return getPawnMoves(p.row, p.col, p.isRed, pieces);
+      default: return [];
+    }
+  }
+
+  // 检查某方是否被将军（含飞将规则）
+  function isInCheck(sideIsRed, pieces) {
+    // 找到己方将/帅
+    var kingIdx = -1;
+    for (var i = 0; i < pieces.length; i++) {
+      if (pieces[i].isRed === sideIsRed && (pieces[i].text === '帥' || pieces[i].text === '將')) {
+        kingIdx = i;
+        break;
+      }
+    }
+    if (kingIdx === -1) return false;
+    var king = pieces[kingIdx];
+
+    // 检查对方所有棋子是否能攻击到将/帅
+    for (var i = 0; i < pieces.length; i++) {
+      if (pieces[i].isRed === sideIsRed) continue;
+      var enemyMoves = getRawMoves(i, pieces);
+      for (var m = 0; m < enemyMoves.length; m++) {
+        if (enemyMoves[m].row === king.row && enemyMoves[m].col === king.col) {
+          return true;
+        }
+      }
+    }
+
+    // 飞将检查：两将同列且之间无棋子
+    var enemyKingIdx = -1;
+    for (var j = 0; j < pieces.length; j++) {
+      if (pieces[j].isRed !== sideIsRed && (pieces[j].text === '帥' || pieces[j].text === '將')) {
+        enemyKingIdx = j;
+        break;
+      }
+    }
+    if (enemyKingIdx !== -1 && pieces[enemyKingIdx].col === king.col) {
+      var blocked = false;
+      var minRow = Math.min(king.row, pieces[enemyKingIdx].row);
+      var maxRow = Math.max(king.row, pieces[enemyKingIdx].row);
+      for (var k = 0; k < pieces.length; k++) {
+        if (k === kingIdx || k === enemyKingIdx) continue;
+        if (pieces[k].col === king.col && pieces[k].row > minRow && pieces[k].row < maxRow) {
+          blocked = true;
+          break;
+        }
+      }
+      if (!blocked) return true;
+    }
+    return false;
+  }
+
+  // 模拟走一步并检查是否会导致己方被将军
+  function isMoveLegal(pieceIndex, toRow, toCol, pieces) {
+    var p = pieces[pieceIndex];
+    var origRow = p.row, origCol = p.col;
+    var capturedIdx = pieceAt(toRow, toCol, pieces);
+    var capturedPiece = null;
+    var adjIndex = pieceIndex;
+
+    // 模拟走子
+    if (capturedIdx !== -1) {
+      capturedPiece = pieces.splice(capturedIdx, 1)[0];
+      if (capturedIdx < adjIndex) adjIndex--;
+    }
+    p.row = toRow;
+    p.col = toCol;
+
+    var inCheck = isInCheck(p.isRed, pieces);
+
+    // 恢复
+    p.row = origRow;
+    p.col = origCol;
+    if (capturedPiece) {
+      pieces.splice(capturedIdx, 0, capturedPiece);
+    }
+
+    return !inCheck;
+  }
+
+  // 获取某颗棋子的最终合法走法（含将军检查）
+  function getLegalMoves(pieceIndex, pieces) {
+    var rawMoves = getRawMoves(pieceIndex, pieces);
+    return rawMoves.filter(function (m) {
+      return isMoveLegal(pieceIndex, m.row, m.col, pieces);
+    });
+  }
+
+  // 某方是否存在任意合法走法
+  function hasLegalMove(sideIsRed, pieces) {
+    for (var i = 0; i < pieces.length; i++) {
+      if (pieces[i].isRed !== sideIsRed) continue;
+      if (getLegalMoves(i, pieces).length > 0) return true;
+    }
+    return false;
+  }
+
+  // 判断某方是否被将死（被将军 + 无合法走法）
+  function isCheckmate(sideIsRed, pieces) {
+    return isInCheck(sideIsRed, pieces) && !hasLegalMove(sideIsRed, pieces);
+  }
+
+  // 判断某方是否被困毙（未被将军 + 无合法走法）
+  function isStalemate(sideIsRed, pieces) {
+    return !isInCheck(sideIsRed, pieces) && !hasLegalMove(sideIsRed, pieces);
+  }
+
+  /* ============ 音效 ============ */
+  let audioCtx = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playMoveSound() {
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, ctx.currentTime);
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.1);
+  }
+
+  function playCaptureSound() {
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(600, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.25);
+    gain.gain.setValueAtTime(0.35, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.25);
+  }
+
+  /* ============ 点击走子 ============ */
+  canvas.addEventListener('click', function (e) {
+    // 游戏结束则忽略点击
+    if (gameOver) return;
+
+    // 坐标换算：屏幕像素 → canvas 像素
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width  / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const clickX = (e.clientX - rect.left) * scaleX;
+    const clickY = (e.clientY - rect.top)  * scaleY;
+
+    // 找到最近的交叉点
+    const col = Math.round((clickX - boardMx) / boardCell);
+    const row = Math.round((clickY - boardMy) / boardCell);
+
+    // 超出棋盘范围则忽略
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
+
+    // 查找目标交叉点上的棋子下标
+    const targetIndex = pieces.findIndex(function (p) {
+      return p.row === row && p.col === col;
+    });
+
+    if (selectedIndex === null) {
+      // --- 未选中任何棋子 → 只能选当前走棋方的棋子 ---
+      if (targetIndex !== -1 && pieces[targetIndex].isRed === currentTurn) {
+        selectedIndex = targetIndex;
+      }
+    } else {
+      // --- 已有棋子被选中 ---
+      if (targetIndex === selectedIndex) {
+        selectedIndex = null;
+      } else if (targetIndex !== -1 && pieces[targetIndex].isRed === pieces[selectedIndex].isRed) {
+        selectedIndex = targetIndex;
+      } else {
+        // 尝试移动或吃子 → 检查合法性
+        var legalMoves = getLegalMoves(selectedIndex, pieces);
+        var isLegal = legalMoves.some(function (m) {
+          return m.row === row && m.col === col;
+        });
+        if (isLegal) {
+          if (targetIndex !== -1) {
+            if (targetIndex < selectedIndex) selectedIndex--;
+            pieces.splice(targetIndex, 1);
+            playCaptureSound();
+          } else {
+            playMoveSound();
+          }
+          pieces[selectedIndex].row = row;
+          pieces[selectedIndex].col = col;
+          selectedIndex = null;
+
+          // 切换走棋方
+          currentTurn = !currentTurn;
+
+          // 检查终局
+          var sideIsRed = currentTurn; // 轮到哪方走，就检查哪方
+          if (isCheckmate(sideIsRed, pieces)) {
+            gameOver = sideIsRed ? 'black' : 'red';
+          } else if (isStalemate(sideIsRed, pieces)) {
+            gameOver = sideIsRed ? 'black' : 'red';
+          }
+        }
+      }
+    }
+
+    // 重绘
+    draw(boardMx, boardMy, boardBw, boardBh, boardCell);
+  });
+
+  // 窗口大小变化时自动重绘
+  window.addEventListener('resize', resize);
+  resize();
+})();
+</script>
+</body>
+</html>
