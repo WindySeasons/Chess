@@ -147,6 +147,12 @@
     <button id="btn-create">创建房间</button>
   </div>
   <div id="create-result" style="margin:0.5em 0;"></div>
+  <div id="share-area" style="display:none;text-align:center;margin:0.5em 0;">
+    <div style="color:#aaa;font-size:0.9em;">分享此链接给对手：</div>
+    <div id="share-link" style="color:#FFD700;font-size:0.85em;word-break:break-all;margin:0.3em 0;"></div>
+    <button id="btn-copy-link" style="font-size:0.9em;padding:0.3em 0.8em;border-radius:6px;border:1px solid #FFD700;background:#3a2a1a;color:#FFD700;cursor:pointer;font-family:inherit;">复制链接</button>
+    <span id="copy-ok" style="color:#4CAF50;margin-left:0.5em;display:none;">已复制！</span>
+  </div>
   <div class="room-row">
     <input id="input-room-code" type="text" maxlength="6" placeholder="输入房间码">
     <button id="btn-join">加入房间</button>
@@ -196,6 +202,10 @@
   const btnJoin         = document.getElementById('btn-join');
   const inputCode       = document.getElementById('input-room-code');
   const createResult    = document.getElementById('create-result');
+  const shareArea       = document.getElementById('share-area');
+  const shareLink       = document.getElementById('share-link');
+  const btnCopyLink     = document.getElementById('btn-copy-link');
+  const copyOk          = document.getElementById('copy-ok');
   const joinError       = document.getElementById('join-error');
   const chatMessages    = document.getElementById('chat-messages');
   const chatInput       = document.getElementById('chat-input');
@@ -235,6 +245,10 @@
     createResult.innerHTML =
       '<div id="room-code-display">' + data.room_code + '</div>' +
       '<div id="waiting-msg">等待对手加入...</div>';
+    // 生成分享链接
+    var url = location.origin + location.pathname + '?room=' + data.room_code;
+    shareLink.textContent = url;
+    shareArea.style.display = '';
   });
 
   socket.on('room_joined', function (data) {
@@ -375,6 +389,13 @@
 
   btnHomeGameOver.addEventListener('click', function () {
     location.reload();
+  });
+
+  btnCopyLink.addEventListener('click', function () {
+    navigator.clipboard.writeText(shareLink.textContent).then(function () {
+      copyOk.style.display = '';
+      setTimeout(function () { copyOk.style.display = 'none'; }, 2000);
+    });
   });
 
   btnLeave.addEventListener('click', function () {
@@ -676,6 +697,15 @@
   });
 
   window.addEventListener('resize', resize);
+
+  // 检测 URL 参数自动加入房间
+  var params = new URLSearchParams(location.search);
+  var roomParam = params.get('room');
+  if (roomParam && roomParam.length === 6) {
+    inputCode.value = roomParam;
+    joinError.textContent = '正在自动加入房间...';
+    socket.emit('join_room', { room_code: roomParam });
+  }
 })();
 </script>
 </body>
