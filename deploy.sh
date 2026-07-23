@@ -20,7 +20,7 @@ fi
 echo ">>> 重启服务..."
 fuser -k 80/tcp 2>/dev/null
 sleep 1
-nohup python3 server.py > /var/log/chess.log 2>&1 &
+nohup python3 -u server.py > /var/log/chess.log 2>&1 &
 
 sleep 2
 echo ">>> 检查服务状态..."

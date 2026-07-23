@@ -38,7 +38,7 @@ def pieces_to_fen(pieces, current_turn):
             line += str(empty)
         fen_rows.append(line)
 
-    turn = 'w' if current_turn else 'b'  # w=红方, b=黑方
+    turn = 'b' if current_turn else 'w'  # Pikafish: w=黑方走, b=红方走
     return '/'.join(fen_rows) + ' ' + turn
 
 
