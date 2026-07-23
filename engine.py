@@ -51,74 +51,58 @@ def uci_to_coords(uci):
     return fr, fc, tr, tc
 
 
-def coords_to_uci(fr, fc, tr, tc):
-    """(from_row, from_col, to_row, to_col) → UCI 走法"""
-    return chr(ord('a') + fc) + str(fr) + chr(ord('a') + tc) + str(tr)
-
-
 def get_engine_path():
     """获取当前平台对应的引擎路径"""
     sys = platform.system()
-    if sys == 'Windows':
-        name = 'pikafish.exe'
-    else:
-        name = 'pikafish'
-    # 先在项目目录找，再回退到 PATH
+    name = 'pikafish.exe' if sys == 'Windows' else 'pikafish'
     local = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
-    if os.path.exists(local):
-        return local
-    return name
+    return local if os.path.exists(local) else name
 
 
 class ChessEngine:
-    """皮卡鱼 UCI 引擎"""
+    """皮卡鱼 UCI 引擎 — 每次查询全新握手，无残留状态"""
 
     def __init__(self, movetime=500, binary=None):
         self.movetime = movetime
-        path = binary or get_engine_path()
-        self._proc = subprocess.Popen(
-            [path],
+        self._binary = binary or get_engine_path()
+
+    def get_best_move(self, fen):
+        """给定 FEN，返回 UCI 走法字符串。每次调用都全新启动引擎进程，彻底隔离状态。"""
+        proc = subprocess.Popen(
+            [self._binary],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
         )
-        # 完整 UCI 握手 + 新局初始化
-        self._cmd('uci')
-        self._read_until('uciok')
-        self._cmd('ucinewgame')
-        self._cmd('isready')
-        self._read_until('readyok')
+        try:
+            # 完整 UCI 握手 + 走子查询，与命令行测试完全一致
+            proc.stdin.write('uci\n')
+            proc.stdin.write('isready\n')
+            proc.stdin.write('ucinewgame\n')
+            proc.stdin.write('isready\n')
+            proc.stdin.write('position fen ' + fen + '\n')
+            proc.stdin.write('go movetime ' + str(self.movetime) + '\n')
+            proc.stdin.flush()
 
-    def _cmd(self, line):
-        self._proc.stdin.write(line + '\n')
-        self._proc.stdin.flush()
+            # 逐行读取直到 bestmove
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith('bestmove'):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1] != '0000':
+                        return parts[1]
+                    return None
+        finally:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                proc.kill()
 
-    def _read_until(self, prefix):
-        for line in self._proc.stdout:
-            line = line.strip()
-            if line.startswith(prefix):
-                return line
-
-    def get_best_move(self, fen):
-        """给定 FEN，返回 UCI 走法字符串，无合法走法返回 None"""
-        self._cmd('position fen ' + fen)
-        self._cmd('go movetime ' + str(self.movetime))
-        resp = self._read_until('bestmove')
-        if not resp:
-            return None
-        parts = resp.split()
-        if len(parts) < 2:
-            return None
-        move = parts[1]
-        if move == '0000':
-            return None
-        return move
+        return None
 
     def close(self):
-        try:
-            self._cmd('quit')
-            self._proc.terminate()
-            self._proc.wait(timeout=3)
-        except Exception:
-            self._proc.kill()
+        pass  # 不再持有持久进程，无需清理
