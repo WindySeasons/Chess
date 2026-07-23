@@ -145,6 +145,7 @@
   <h1>中国象棋</h1>
   <div class="room-row">
     <button id="btn-create">创建房间</button>
+    <button id="btn-create-ai" style="background:#8B0000;border-color:#FF4444;">人机对战</button>
   </div>
   <div id="create-result" style="margin:0.5em 0;"></div>
   <div id="share-area" style="display:none;text-align:center;margin:0.5em 0;">
@@ -199,6 +200,7 @@
   const statusOverlay   = document.getElementById('status-overlay');
   const statusText      = document.getElementById('status-text');
   const btnCreate       = document.getElementById('btn-create');
+  const btnCreateAI     = document.getElementById('btn-create-ai');
   const btnJoin         = document.getElementById('btn-join');
   const inputCode       = document.getElementById('input-room-code');
   const createResult    = document.getElementById('create-result');
@@ -223,11 +225,12 @@
   const COLS = 9, ROWS = 10;
 
   /* ============ 游戏状态 ============ */
-  let mySide     = null;   // 'red' | 'black'
+  let mySide     = null;
   let currentTurn = 'red';
   let pieces     = [];
   let selectedIndex = null;
   let gameEnded   = false;
+  let isAI        = false;
 
   /* ============ SocketIO ============ */
   const socket = io();
@@ -273,16 +276,19 @@
     mySide = data.your_side;
     currentTurn = data.current_turn;
     gameEnded = false;
+    isAI = data.ai || false;
     document.getElementById('info-room-code').textContent =
       document.getElementById('info-room-code').textContent || '';
     document.getElementById('info-side').textContent =
-      mySide === 'red' ? '你执红方' : '你执黑方';
+      mySide === 'red' ? (isAI ? '你执红方 (vs AI)' : '你执红方') : '你执黑方';
     document.getElementById('info-side').className =
       'side-label ' + (mySide === 'red' ? 'red' : 'black');
     roomOverlay.classList.add('hidden');
     gameContainer.classList.remove('hidden');
     statusOverlay.classList.remove('show');
     moveLog.innerHTML = '';
+    // AI 模式隐藏聊天
+    document.getElementById('chat-box').style.display = isAI ? 'none' : '';
     updateButtonBar();
     updateTurnInfo();
     resize();
@@ -328,8 +334,12 @@
     mySide = data.your_side;
     currentTurn = data.current_turn;
     gameEnded = false;
+    isAI = data.ai || false;
     statusOverlay.classList.remove('show');
     moveLog.innerHTML = '';
+    document.getElementById('info-side').textContent =
+      mySide === 'red' ? (isAI ? '你执红方 (vs AI)' : '你执红方') : '你执黑方';
+    document.getElementById('chat-box').style.display = isAI ? 'none' : '';
     updateButtonBar();
     updateTurnInfo();
     resize();
@@ -355,6 +365,12 @@
     joinError.textContent = '';
     createResult.innerHTML = '<span style="color:#FFD700">创建中...</span>';
     socket.emit('create_room');
+  });
+
+  btnCreateAI.addEventListener('click', function () {
+    joinError.textContent = '';
+    createResult.innerHTML = '<span style="color:#FFD700">启动 AI 引擎...</span>';
+    socket.emit('create_room', { ai: true });
   });
 
   btnJoin.addEventListener('click', function () {
@@ -453,6 +469,9 @@
     if (gameEnded) {
       el.textContent = currentTurn === 'red' ? '红方胜' : '黑方胜';
       el.style.color = currentTurn === 'red' ? '#FF6666' : '#aaa';
+    } else if (isAI && currentTurn === 'black') {
+      el.textContent = 'AI 思考中...';
+      el.style.color = '#FFD700';
     } else {
       el.textContent = '当前走棋: ' + (currentTurn === 'red' ? '红方' : '黑方');
       el.style.color = currentTurn === 'red' ? '#FF6666' : '#aaa';
@@ -606,7 +625,7 @@
   /* ============ 点击走子（发送到服务器） ============ */
   canvas.addEventListener('click', function (e) {
     if (gameEnded || pieces.length === 0) return;
-    if (currentTurn !== mySide) return;  // 不是自己的回合
+    if (currentTurn !== mySide) return;  // 对方回合 或 AI 回合
 
     var rect = canvas.getBoundingClientRect();
     var scaleX = canvas.width  / rect.width;

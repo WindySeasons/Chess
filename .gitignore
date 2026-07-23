@@ -10,3 +10,9 @@ venv/
 *.log
 .DS_Store
 Thumbs.db
+
+# 皮卡鱼引擎
+pikafish
+pikafish.exe
+pikafish-*/
+

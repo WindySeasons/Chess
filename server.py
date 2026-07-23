@@ -4,6 +4,7 @@ eventlet.monkey_patch()
 import random
 from flask import Flask, send_from_directory, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from engine import ChessEngine, pieces_to_fen, uci_to_coords
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 app.config['SECRET_KEY'] = 'chess-online-secret'
@@ -363,6 +364,7 @@ def on_disconnect():
     if not code or code not in rooms:
         return
     room = rooms[code]
+    _cleanup_engine(room)
     opp = opponent_sid(room, request.sid)
     if opp:
         socketio.emit('opponent_disconnected', to=opp)
@@ -370,21 +372,45 @@ def on_disconnect():
 
 
 @socketio.on('create_room')
-def on_create_room():
+def on_create_room(data=None):
     code = generate_room_code()
+    ai_mode = data.get('ai', False) if isinstance(data, dict) else False
     rooms[code] = {
         'creator': request.sid,
         'joiner': None,
         'pieces': create_initial_pieces(),
         'current_turn': True,  # True=红方
         'game_started': False,
-        'game_over': None,     # None / 'red' / 'black'
+        'game_over': None,
         'chat': [],
         'move_history': [],
+        'ai_game': ai_mode,
+        'engine': None,
     }
     sid_to_room[request.sid] = code
     join_room(code)
-    emit('room_created', {'room_code': code, 'side': 'red'})
+    emit('room_created', {'room_code': code, 'side': 'red', 'ai': ai_mode})
+
+    if ai_mode:
+        # AI 房间直接开始
+        room = rooms[code]
+        room['game_started'] = True
+        try:
+            room['engine'] = ChessEngine()
+        except Exception as e:
+            print(f'[engine] 启动失败: {e}')
+            emit('error', {'message': 'AI 引擎启动失败，请确保已下载皮卡鱼 (bash setup.sh)'})
+            del rooms[code]
+            return
+        pieces_data = [dict(p) for p in room['pieces']]
+        socketio.emit('game_start', {
+            'pieces': pieces_data,
+            'your_side': 'red',
+            'current_turn': 'red',
+            'ai': True,
+        }, to=request.sid)
+        print(f'[room] {code} AI game started')
+
     print(f'[room] {code} created by {request.sid}')
 
 
@@ -510,10 +536,86 @@ def on_move(data):
         winner = 'black' if side_in_check else 'red'
         room['game_over'] = winner
         socketio.emit('game_over', {'winner': winner, 'reason': 'checkmate'}, to=code)
+        _cleanup_engine(room)
     elif is_stalemate(side_in_check, room['pieces']):
         winner = 'black' if side_in_check else 'red'
         room['game_over'] = winner
         socketio.emit('game_over', {'winner': winner, 'reason': 'stalemate'}, to=code)
+        _cleanup_engine(room)
+    elif room['ai_game'] and not room['game_over'] and not room['current_turn']:
+        # AI 走棋（黑方，current_turn == False）
+        _ai_move(room, code)
+
+
+def _cleanup_engine(room):
+    if room.get('engine'):
+        try:
+            room['engine'].close()
+        except Exception:
+            pass
+        room['engine'] = None
+
+
+def _ai_move(room, code):
+    """AI 自动走一步"""
+    fen = pieces_to_fen(room['pieces'], room['current_turn'])
+    uci = room['engine'].get_best_move(fen)
+    if not uci:
+        return
+
+    fr, fc, tr, tc = uci_to_coords(uci)
+    src_idx = piece_at(fr, fc, room['pieces'])
+    if src_idx == -1:
+        return
+
+    piece_text = room['pieces'][src_idx]['text']
+    piece_is_red = room['pieces'][src_idx]['isRed']
+
+    captured = False
+    target_idx = piece_at(tr, tc, room['pieces'])
+    if target_idx != -1:
+        room['pieces'].pop(target_idx)
+        if target_idx < src_idx:
+            src_idx -= 1
+        captured = True
+
+    room['pieces'][src_idx]['row'] = tr
+    room['pieces'][src_idx]['col'] = tc
+    room['current_turn'] = not room['current_turn']
+
+    room['move_history'].append({
+        'from_row': fr, 'from_col': fc,
+        'to_row': tr, 'to_col': tc,
+        'captured_piece': None,
+        'piece_text': piece_text,
+    })
+
+    turn_str = 'red' if room['current_turn'] else 'black'
+    side_label = '红方' if piece_is_red else '黑方'
+    socketio.emit('move_made', {
+        'from': {'row': fr, 'col': fc},
+        'to': {'row': tr, 'col': tc},
+        'piece_text': piece_text,
+        'side_label': side_label,
+        'captured': captured,
+        'current_turn': turn_str,
+    }, to=code)
+
+    # 检查终局
+    side_in_check = room['current_turn']
+    if is_in_check(side_in_check, room['pieces']):
+        socketio.emit('in_check', {'side': 'red' if side_in_check else 'black'}, to=code)
+
+    if is_checkmate(side_in_check, room['pieces']):
+        winner = 'black' if side_in_check else 'red'
+        room['game_over'] = winner
+        socketio.emit('game_over', {'winner': winner, 'reason': 'checkmate'}, to=code)
+        _cleanup_engine(room)
+    elif is_stalemate(side_in_check, room['pieces']):
+        winner = 'black' if side_in_check else 'red'
+        room['game_over'] = winner
+        socketio.emit('game_over', {'winner': winner, 'reason': 'stalemate'}, to=code)
+        _cleanup_engine(room)
 
 
 @socketio.on('request_undo')
@@ -571,6 +673,7 @@ def on_resign():
     side = my_side(room, request.sid)
     winner = 'black' if side == 'red' else 'red'
     room['game_over'] = winner
+    _cleanup_engine(room)
     socketio.emit('game_over', {'winner': winner, 'reason': 'resign'}, to=code)
 
 
@@ -581,6 +684,8 @@ def on_play_again():
     if not room or not room['game_over']:
         return
 
+    _cleanup_engine(room)
+
     # 重置游戏
     room['pieces'] = create_initial_pieces()
     room['current_turn'] = True
@@ -588,13 +693,28 @@ def on_play_again():
     room['move_history'] = []
     room['game_started'] = True
 
+    # AI 房间重新启动引擎
+    if room['ai_game']:
+        try:
+            room['engine'] = ChessEngine()
+        except Exception as e:
+            print(f'[engine] 重启失败: {e}')
+
     pieces_data = [dict(p) for p in room['pieces']]
-    for sid, side in [(room['creator'], 'red'), (room['joiner'], 'black')]:
+    if room['ai_game']:
         socketio.emit('game_reset', {
             'pieces': pieces_data,
-            'your_side': side,
+            'your_side': 'red',
             'current_turn': 'red',
-        }, to=sid)
+            'ai': True,
+        }, to=room['creator'])
+    else:
+        for sid, side in [(room['creator'], 'red'), (room['joiner'], 'black')]:
+            socketio.emit('game_reset', {
+                'pieces': pieces_data,
+                'your_side': side,
+                'current_turn': 'red',
+            }, to=sid)
 
 
 @socketio.on('chat')
