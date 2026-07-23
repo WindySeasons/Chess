@@ -594,12 +594,31 @@ def _ai_move(room, code):
         # 执行走子
         break
     else:
-        # 所有重试失败
-        print('[AI] 引擎连续失败，判 AI 负')
-        room['game_over'] = 'red'
-        _cleanup_engine(room)
-        socketio.emit('game_over', {'winner': 'red', 'reason': 'ai_error'}, to=code)
-        return
+        # 引擎失败 → 用服务端规则引擎兜底：随机选一个合法走法
+        print('[AI] 引擎失败，启用规则引擎兜底...')
+        legal_moves = []
+        src_idx_fallback = -1
+        for i, p in enumerate(room['pieces']):
+            if p['isRed']:  # 跳过红方
+                continue
+            moves = get_legal_moves(i, room['pieces'])
+            if moves:
+                legal_moves = moves
+                src_idx_fallback = i
+                break  # 取第一颗有合法走法的黑棋
+        if not legal_moves:
+            print('[AI] 规则引擎也无合法走法，判 AI 负')
+            room['game_over'] = 'red'
+            _cleanup_engine(room)
+            socketio.emit('game_over', {'winner': 'red', 'reason': 'ai_error'}, to=code)
+            return
+        # 选第一个合法走法
+        fr, fc = room['pieces'][src_idx_fallback]['row'], room['pieces'][src_idx_fallback]['col']
+        tr, tc = legal_moves[0]['row'], legal_moves[0]['col']
+        src_idx = src_idx_fallback
+        piece_text = room['pieces'][src_idx]['text']
+        piece_is_red = False
+        print(f'[AI] 规则引擎走: {piece_text} ({fr},{fc})→({tr},{tc})')
 
     captured = False
     target_idx = piece_at(tr, tc, room['pieces'])
