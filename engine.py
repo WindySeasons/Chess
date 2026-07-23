@@ -83,9 +83,10 @@ class ChessEngine:
             stderr=subprocess.DEVNULL,
             text=True,
         )
-        # 完整 UCI 握手
+        # 完整 UCI 握手 + 新局初始化
         self._cmd('uci')
         self._read_until('uciok')
+        self._cmd('ucinewgame')
         self._cmd('isready')
         self._read_until('readyok')
 
@@ -101,9 +102,6 @@ class ChessEngine:
 
     def get_best_move(self, fen):
         """给定 FEN，返回 UCI 走法字符串，无合法走法返回 None"""
-        self._cmd('ucinewgame')
-        self._cmd('isready')
-        self._read_until('readyok')
         self._cmd('position fen ' + fen)
         self._cmd('go movetime ' + str(self.movetime))
         resp = self._read_until('bestmove')
