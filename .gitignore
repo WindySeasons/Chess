@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+.venv/
+venv/
+*.log
+.DS_Store
+Thumbs.db
+
+# 皮卡鱼引擎
+pikafish
+pikafish.exe
+pikafish-*/
+
+# 临时日志/输出文件
+output.txt
+server_err.txt
+server_out.txt
+*.log
+
