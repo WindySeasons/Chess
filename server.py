@@ -557,14 +557,14 @@ def _cleanup_engine(room):
 
 
 def _ai_move(room, code):
-    """AI 自动走一步（黑方），带容错重试"""
+    """AI 自动走一步（黑方），带容错重试 + 全量走法校验"""
     fen = pieces_to_fen(room['pieces'], room['current_turn'])
     print(f'[AI] turn={room["current_turn"]} FEN: {fen}')
 
     # 重试最多 2 次
     for attempt in range(2):
         uci = room['engine'].get_best_move(fen)
-        print(f'[AI] bestmove: {uci}')
+        print(f'[AI] attempt={attempt} bestmove: {uci}')
 
         if not uci:
             print('[AI] 引擎无返回，无法继续')
@@ -581,7 +581,14 @@ def _ai_move(room, code):
         piece_is_red = room['pieces'][src_idx]['isRed']
 
         if piece_is_red:
-            print(f'[AI] 错误: 引擎试图走红方棋子 {piece_text}，重试...')
+            print(f'[AI] 引擎试图走红方棋子 {piece_text}，重试...')
+            continue
+
+        # 全量走法校验
+        legal = get_legal_moves(src_idx, room['pieces'])
+        is_legal = any(m['row'] == tr and m['col'] == tc for m in legal)
+        if not is_legal:
+            print(f'[AI] 引擎返回非法走法 ({fr},{fc})→({tr},{tc})，重试...')
             continue
 
         # 执行走子
