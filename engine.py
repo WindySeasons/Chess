@@ -103,6 +103,8 @@ class ChessEngine:
     def get_best_move(self, fen):
         """给定 FEN，返回 UCI 走法字符串，无合法走法返回 None"""
         self._cmd('ucinewgame')
+        self._cmd('isready')
+        self._read_until('readyok')
         self._cmd('position fen ' + fen)
         self._cmd('go movetime ' + str(self.movetime))
         resp = self._read_until('bestmove')
