@@ -557,27 +557,41 @@ def _cleanup_engine(room):
 
 
 def _ai_move(room, code):
-    """AI 自动走一步（黑方）"""
+    """AI 自动走一步（黑方），带容错重试"""
     fen = pieces_to_fen(room['pieces'], room['current_turn'])
-    print(f'[AI] FEN: {fen}')
-    uci = room['engine'].get_best_move(fen)
-    print(f'[AI] bestmove: {uci}')
-    if not uci:
-        print('[AI] 引擎无返回')
-        return
+    print(f'[AI] turn={room["current_turn"]} FEN: {fen}')
 
-    fr, fc, tr, tc = uci_to_coords(uci)
-    src_idx = piece_at(fr, fc, room['pieces'])
-    if src_idx == -1:
-        print(f'[AI] 源位置 ({fr},{fc}) 无棋子')
-        return
+    # 重试最多 2 次
+    for attempt in range(2):
+        uci = room['engine'].get_best_move(fen)
+        print(f'[AI] bestmove: {uci}')
 
-    piece_text = room['pieces'][src_idx]['text']
-    piece_is_red = room['pieces'][src_idx]['isRed']
+        if not uci:
+            print('[AI] 引擎无返回，无法继续')
+            break
 
-    # 安全检查：只允许走黑方棋子
-    if piece_is_red:
-        print(f'[AI] 错误: 引擎试图走红方棋子 {piece_text}')
+        fr, fc, tr, tc = uci_to_coords(uci)
+        src_idx = piece_at(fr, fc, room['pieces'])
+
+        if src_idx == -1:
+            print(f'[AI] 源位置 ({fr},{fc}) 无棋子，重试...')
+            continue
+
+        piece_text = room['pieces'][src_idx]['text']
+        piece_is_red = room['pieces'][src_idx]['isRed']
+
+        if piece_is_red:
+            print(f'[AI] 错误: 引擎试图走红方棋子 {piece_text}，重试...')
+            continue
+
+        # 执行走子
+        break
+    else:
+        # 所有重试失败
+        print('[AI] 引擎连续失败，判 AI 负')
+        room['game_over'] = 'red'
+        _cleanup_engine(room)
+        socketio.emit('game_over', {'winner': 'red', 'reason': 'ai_error'}, to=code)
         return
 
     captured = False
