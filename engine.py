@@ -67,7 +67,7 @@ class ChessEngine:
         self._binary = binary or get_engine_path()
 
     def get_best_move(self, fen):
-        """给定 FEN，返回 UCI 走法字符串。每次调用都全新启动引擎进程，彻底隔离状态。"""
+        """给定 FEN，返回 UCI 走法字符串。每次调用全新启动引擎进程。"""
         proc = subprocess.Popen(
             [self._binary],
             stdin=subprocess.PIPE,
@@ -76,20 +76,20 @@ class ChessEngine:
             text=True,
         )
         try:
-            # 完整 UCI 握手 + 走子查询，与命令行测试完全一致
-            proc.stdin.write('uci\n')
-            proc.stdin.write('isready\n')
-            proc.stdin.write('ucinewgame\n')
-            proc.stdin.write('isready\n')
-            proc.stdin.write('position fen ' + fen + '\n')
-            proc.stdin.write('go movetime ' + str(self.movetime) + '\n')
-            proc.stdin.flush()
+            # 所有 UCI 命令一次性写入，与 printf 管道行为完全一致
+            commands = (
+                'uci\n'
+                'isready\n'
+                'ucinewgame\n'
+                'isready\n'
+                'position fen ' + fen + '\n'
+                'go movetime ' + str(self.movetime) + '\n'
+            )
+            proc.stdin.write(commands)
+            proc.stdin.close()  # 关闭 stdin，与 printf 管道行为一致
 
-            # 逐行读取直到 bestmove
             for line in proc.stdout:
                 line = line.strip()
-                if not line:
-                    continue
                 if line.startswith('bestmove'):
                     parts = line.split()
                     if len(parts) >= 2 and parts[1] != '0000':
